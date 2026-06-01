@@ -197,6 +197,20 @@ hr { border-color: #E2E8F0 !important; margin: 1.2rem 0 !important; }
 /* ── Alerts / info ──────────────────────────────────── */
 [data-testid="stAlert"] { border-radius: 10px !important; }
 
+/* ── Main content headings — force visible dark color ── */
+.main h1, .main h2, .main h3,
+[data-testid="stAppViewContainer"] h1,
+[data-testid="stAppViewContainer"] h2,
+[data-testid="stAppViewContainer"] h3 {
+    color: #1E293B !important;
+    opacity: 1 !important;
+}
+
+/* ── Hide Streamlit top-right GitHub/Fork button ──────── */
+[data-testid="stToolbar"],
+.viewerBadge_container__r5tak,
+#GithubIcon { visibility: hidden !important; display: none !important; }
+
 /* ── Applied (disabled) button — green ──────────────── */
 .stButton > button[disabled] {
     background: #10B981 !important;
@@ -246,13 +260,22 @@ DATA_DIR       = "./data"
 
 # ── Cloud / local mode detection ───────────────────────────────────────────────
 def _groq_key() -> str:
+    # Try every possible way to get the key
     try:
-        return st.secrets.get("GROQ_API_KEY", "")
+        k = st.secrets["GROQ_API_KEY"]
+        if k:
+            return k
     except Exception:
-        return os.getenv("GROQ_API_KEY", "")
+        pass
+    try:
+        k = st.secrets.get("GROQ_API_KEY", "")
+        if k:
+            return k
+    except Exception:
+        pass
+    return os.getenv("GROQ_API_KEY", "")
 
 def IS_CLOUD() -> bool:
-    """Evaluated at runtime so st.secrets is always available."""
     return bool(_groq_key())
 
 # Local models (Ollama)
@@ -891,6 +914,9 @@ with st.sidebar:
         st.caption("Cloud mode · Groq API · Free")
     else:
         st.caption("Local mode · Ollama · 100% private")
+        # Warn on cloud if key missing
+        if not _groq_key() and os.environ.get("HOME", "").startswith("/home"):
+            st.warning("⚠️ GROQ_API_KEY missing in Streamlit secrets. Chat won't work.", icon="🔑")
     st.divider()
 
     st.subheader("0 · Chat Model")
