@@ -237,13 +237,6 @@ section[data-testid="stSidebar"] [data-testid="stFileUploader"] span {
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-# Pre-warm embedding model on cloud so it's ready before the demo
-if IS_CLOUD():
-    try:
-        _st_embedder()
-    except Exception:
-        pass
-
 EMBED_MODEL    = "nomic-embed-text"
 COLLECTION     = "resume_chunks"
 APP_COLLECTION = "job_applications"
@@ -866,6 +859,13 @@ def search_adzuna(keyword: str, country_label: str,
         return results
     except Exception:
         return []
+
+# ── Pre-warm embedder on cloud (all functions defined above by this point) ─────
+if IS_CLOUD():
+    try:
+        _st_embedder()
+    except Exception:
+        pass
 
 # ── Session state ──────────────────────────────────────────────────────────────
 defaults = {
