@@ -220,10 +220,20 @@ button[kind="header"] {
     opacity: 1 !important;
 }
 
-/* ── Hide Streamlit top-right GitHub/Fork button ──────── */
-[data-testid="stToolbar"],
+/* ── Hide only GitHub/Fork — NOT the sidebar toggle ──── */
 .viewerBadge_container__r5tak,
 #GithubIcon { visibility: hidden !important; display: none !important; }
+
+/* ── Sidebar collapse/expand toggle — always visible ─── */
+[data-testid="collapsedControl"] {
+    visibility: visible !important;
+    display: flex !important;
+    background: #6366F1 !important;
+    border-radius: 0 8px 8px 0 !important;
+    color: white !important;
+    opacity: 1 !important;
+}
+[data-testid="collapsedControl"] svg { fill: white !important; }
 
 /* ── Applied (disabled) button — green ──────────────── */
 .stButton > button[disabled] {
