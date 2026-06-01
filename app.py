@@ -17,6 +17,7 @@ st.set_page_config(
     page_title="Career Assistant",
     page_icon="💼",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 CUSTOM_CSS = """
@@ -203,6 +204,19 @@ hr { border-color: #E2E8F0 !important; margin: 1.2rem 0 !important; }
 [data-testid="stAppViewContainer"] h2,
 [data-testid="stAppViewContainer"] h3 {
     color: #1E293B !important;
+    opacity: 1 !important;
+}
+
+/* ── Sidebar toggle button — make it visible ─────────── */
+[data-testid="collapsedControl"] {
+    background: #6366F1 !important;
+    border-radius: 0 8px 8px 0 !important;
+    color: white !important;
+    width: 24px !important;
+    opacity: 1 !important;
+}
+button[kind="header"] {
+    color: #CBD5E1 !important;
     opacity: 1 !important;
 }
 
