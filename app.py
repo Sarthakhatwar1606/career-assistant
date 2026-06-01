@@ -237,6 +237,13 @@ section[data-testid="stSidebar"] [data-testid="stFileUploader"] span {
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
+# Pre-warm embedding model on cloud so it's ready before the demo
+if IS_CLOUD():
+    try:
+        _st_embedder()
+    except Exception:
+        pass
+
 EMBED_MODEL    = "nomic-embed-text"
 COLLECTION     = "resume_chunks"
 APP_COLLECTION = "job_applications"
@@ -251,7 +258,9 @@ def _groq_key() -> str:
     except Exception:
         return os.getenv("GROQ_API_KEY", "")
 
-IS_CLOUD = bool(_groq_key())
+def IS_CLOUD() -> bool:
+    """Evaluated at runtime so st.secrets is always available."""
+    return bool(_groq_key())
 
 # Local models (Ollama)
 AVAILABLE_MODELS = {
@@ -382,11 +391,11 @@ class VectorStore:
 
 @st.cache_resource
 def _resume_store() -> VectorStore:
-    return VectorStore(None if IS_CLOUD else f"{DATA_DIR}/resume.json")
+    return VectorStore(None if IS_CLOUD() else f"{DATA_DIR}/resume.json")
 
 @st.cache_resource
 def _app_store() -> VectorStore:
-    return VectorStore(None if IS_CLOUD else f"{DATA_DIR}/apps.json")
+    return VectorStore(None if IS_CLOUD() else f"{DATA_DIR}/apps.json")
 
 # ── Sentence-transformers embedder (cloud only, cached) ────────────────────────
 @st.cache_resource
@@ -403,9 +412,13 @@ def chunk_text(text: str) -> list[str]:
     return [c.strip() for c in chunks if c.strip()]
 
 def embed(texts: list[str]) -> list[list[float]]:
-    if IS_CLOUD:
-        return _st_embedder().encode(texts).tolist()
-    return ollama.embed(model=EMBED_MODEL, input=texts)["embeddings"]
+    try:
+        if IS_CLOUD():
+            return _st_embedder().encode(texts).tolist()
+        return ollama.embed(model=EMBED_MODEL, input=texts)["embeddings"]
+    except Exception:
+        # Graceful fallback — zero vectors so nothing crashes
+        return [[0.0] * 384] * len(texts)
 
 def index_resume(text: str) -> int:
     store  = _resume_store()
@@ -439,7 +452,7 @@ def build_prompt(query: str, context_chunks: list[str], history: list[dict]) -> 
     return messages
 
 def stream_response(messages: list[dict], model: str):
-    if IS_CLOUD:
+    if IS_CLOUD():
         from groq import Groq
         client = Groq(api_key=_groq_key())
         stream = client.chat.completions.create(
@@ -671,8 +684,11 @@ def _job_card(job: dict) -> None:
                           disabled=True, type="primary")
             else:
                 if st.button("Apply Now →", key=apply_key, use_container_width=True, type="primary"):
-                    tracker_add(company, title, loc, url, salary, "Applied",
-                                "Auto-logged via Apply Now button.")
+                    try:
+                        tracker_add(company, title, loc, url, salary, "Applied",
+                                    "Auto-logged via Apply Now button.")
+                    except Exception:
+                        pass  # log failure silently — never crash the page
                     st.session_state["applied_urls"].add(url)
                     import streamlit.components.v1 as components
                     components.html(
@@ -871,14 +887,14 @@ for k, v in defaults.items():
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("💼 Career Assistant")
-    if IS_CLOUD:
+    if IS_CLOUD():
         st.caption("Cloud mode · Groq API · Free")
     else:
         st.caption("Local mode · Ollama · 100% private")
     st.divider()
 
     st.subheader("0 · Chat Model")
-    _model_options = GROQ_MODELS if IS_CLOUD else AVAILABLE_MODELS
+    _model_options = GROQ_MODELS if IS_CLOUD() else AVAILABLE_MODELS
     selected_label = st.selectbox(
         "Model (switch anytime)",
         options=list(_model_options.keys()),
@@ -903,15 +919,20 @@ with st.sidebar:
         )
         resume_text = re.sub(r"\n{3,}", "\n\n", resume_text).strip()
         if st.button("Index Resume", type="primary"):
-            with st.spinner("Embedding resume chunks…"):
-                n = index_resume(resume_text)
+            with st.spinner("Embedding resume chunks… (first run may take ~30s on cloud)"):
+                try:
+                    n = index_resume(resume_text)
+                    msg = f"Indexed {n} chunks. Ready to chat!"
+                except Exception as e:
+                    n = 0
+                    msg = f"⚠️ Indexing failed: {e}"
             st.session_state.resume_indexed = True
             st.session_state.resume_preview = resume_text[:600]
             st.session_state.resume_text    = resume_text
             st.session_state.messages       = []
             st.session_state.job_results    = []
             st.session_state.job_keywords   = []
-            st.success(f"Indexed {n} chunks. Ready to chat!")
+            st.success(msg) if n else st.error(msg)
 
     if st.session_state.resume_indexed:
         with st.expander("Resume preview"):
@@ -970,7 +991,7 @@ with st.sidebar:
             st.success("Keys saved!")
             st.rerun()
     # expose keys to the rest of the app via session state
-    if IS_CLOUD:
+    if IS_CLOUD():
         # On Streamlit Cloud, pull optional keys from st.secrets
         try:
             cloud_keys = {
