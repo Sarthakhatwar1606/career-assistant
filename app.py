@@ -1,6 +1,6 @@
 import streamlit as st
 import ollama
-import chromadb
+import numpy as np
 import pypdf
 import requests
 import json
@@ -304,12 +304,89 @@ COUNTRY_FILTERS = {
     "Europe":             ["europe", "eu", "remote", "worldwide", "anywhere"],
 }
 
-# ── ChromaDB — persistent locally, in-memory on cloud ─────────────────────────
+# ── Lightweight numpy vector store (replaces ChromaDB) ────────────────────────
+class VectorStore:
+    def __init__(self, persist_path: str | None = None):
+        self.docs:  list[str]        = []
+        self.embs:  list[list[float]] = []
+        self.metas: list[dict]       = []
+        self.ids:   list[str]        = []
+        self.path = persist_path
+        if persist_path and os.path.exists(persist_path):
+            self._load()
+
+    def add(self, documents, embeddings, ids, metadatas=None):
+        for i, (doc, emb, id_) in enumerate(zip(documents, embeddings, ids)):
+            self.docs.append(doc)
+            self.embs.append(emb)
+            self.ids.append(id_)
+            self.metas.append((metadatas or [{}] * len(documents))[i])
+        self._save()
+
+    def count(self) -> int:
+        return len(self.docs)
+
+    def query(self, query_embeddings, n_results=4, **_):
+        if not self.embs:
+            return {"documents": [[]], "metadatas": [[]], "distances": [[]], "ids": [[]]}
+        q   = np.array(query_embeddings[0], dtype=np.float32)
+        emb = np.array(self.embs,           dtype=np.float32)
+        q   /= np.linalg.norm(q)   + 1e-10
+        emb /= np.linalg.norm(emb, axis=1, keepdims=True) + 1e-10
+        scores  = emb @ q
+        n       = min(n_results, len(self.docs))
+        top_idx = np.argsort(scores)[::-1][:n].tolist()
+        return {
+            "documents": [[self.docs[i]  for i in top_idx]],
+            "metadatas": [[self.metas[i] for i in top_idx]],
+            "distances": [[float(1 - scores[i]) for i in top_idx]],
+            "ids":       [[self.ids[i]   for i in top_idx]],
+        }
+
+    def get(self, **_):
+        return {"ids": self.ids, "documents": self.docs, "metadatas": self.metas}
+
+    def update(self, ids, metadatas):
+        for id_, meta in zip(ids, metadatas):
+            if id_ in self.ids:
+                self.metas[self.ids.index(id_)].update(meta)
+        self._save()
+
+    def delete(self, ids):
+        for id_ in ids:
+            if id_ in self.ids:
+                i = self.ids.index(id_)
+                self.docs.pop(i); self.embs.pop(i)
+                self.metas.pop(i); self.ids.pop(i)
+        self._save()
+
+    def clear(self):
+        self.docs.clear(); self.embs.clear()
+        self.metas.clear(); self.ids.clear()
+        if self.path and os.path.exists(self.path):
+            os.remove(self.path)
+
+    def _save(self):
+        if not self.path:
+            return
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        with open(self.path, "w") as f:
+            json.dump({"docs": self.docs, "embs": self.embs,
+                       "metas": self.metas, "ids": self.ids}, f)
+
+    def _load(self):
+        with open(self.path) as f:
+            d = json.load(f)
+        self.docs  = d["docs"];  self.embs  = d["embs"]
+        self.metas = d["metas"]; self.ids   = d["ids"]
+
 @st.cache_resource
-def get_chroma():
-    if IS_CLOUD:
-        return chromadb.Client()                      # ephemeral — fine for cloud
-    return chromadb.PersistentClient(path=DATA_DIR)   # persists between restarts locally
+def _resume_store() -> VectorStore:
+    return VectorStore(None if IS_CLOUD else f"{DATA_DIR}/resume.json")
+
+@st.cache_resource
+def _app_store() -> VectorStore:
+    return VectorStore(None if IS_CLOUD else f"{DATA_DIR}/apps.json")
 
 # ── Sentence-transformers embedder (cloud only, cached) ────────────────────────
 @st.cache_resource
@@ -331,26 +408,20 @@ def embed(texts: list[str]) -> list[list[float]]:
     return ollama.embed(model=EMBED_MODEL, input=texts)["embeddings"]
 
 def index_resume(text: str) -> int:
-    client = get_chroma()
-    try:
-        client.delete_collection(COLLECTION)
-    except Exception:
-        pass
-    col = client.create_collection(COLLECTION)
+    store  = _resume_store()
+    store.clear()
     chunks = chunk_text(text)
-    col.add(documents=chunks, embeddings=embed(chunks),
-            ids=[f"chunk_{i}" for i in range(len(chunks))])
+    store.add(documents=chunks, embeddings=embed(chunks),
+              ids=[f"chunk_{i}" for i in range(len(chunks))])
     return len(chunks)
 
 def retrieve(query: str, n: int = 4) -> list[str]:
-    client = get_chroma()
-    try:
-        col = client.get_collection(COLLECTION)
-    except Exception:
+    store = _resume_store()
+    if store.count() == 0:
         return []
-    results = col.query(query_embeddings=[embed([query])[0]],
-                        n_results=min(n, col.count()))
-    return results["documents"][0] if results["documents"] else []
+    res = store.query(query_embeddings=[embed([query])[0]],
+                      n_results=min(n, store.count()))
+    return res["documents"][0] if res["documents"] else []
 
 def build_prompt(query: str, context_chunks: list[str], history: list[dict]) -> list[dict]:
     system = (
@@ -386,69 +457,49 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
     reader = pypdf.PdfReader(io.BytesIO(file_bytes))
     return "\n".join(page.extract_text() or "" for page in reader.pages)
 
-# ── Application tracker (ChromaDB) ────────────────────────────────────────────
-def _get_app_col():
-    client = get_chroma()
-    try:
-        return client.get_collection(APP_COLLECTION)
-    except Exception:
-        return client.create_collection(APP_COLLECTION)
-
+# ── Application tracker (VectorStore) ─────────────────────────────────────────
 def tracker_add(company: str, role: str, location: str, url: str,
                 salary: str, status: str, notes: str) -> str:
-    col = _get_app_col()
+    store  = _app_store()
     app_id = str(uuid.uuid4())
-    doc = f"{role} at {company}"
-    col.add(
-        documents=[doc],
-        embeddings=embed([doc]),
+    store.add(
+        documents=[f"{role} at {company}"],
+        embeddings=embed([f"{role} at {company}"]),
         ids=[app_id],
         metadatas=[{
-            "company":      company,
-            "role":         role,
-            "location":     location,
-            "url":          url,
-            "salary":       salary,
-            "status":       status,
-            "notes":        notes,
+            "company": company, "role": role, "location": location,
+            "url": url, "salary": salary, "status": status, "notes": notes,
             "applied_date": datetime.now(tz=timezone.utc).strftime("%Y-%m-%d"),
         }],
     )
     return app_id
 
 def tracker_all() -> list[dict]:
-    col = _get_app_col()
-    if col.count() == 0:
+    store = _app_store()
+    if store.count() == 0:
         return []
-    res = col.get(include=["metadatas", "documents"])
-    apps = []
-    for i, app_id in enumerate(res["ids"]):
-        m = res["metadatas"][i]
-        apps.append({"id": app_id, **m})
+    res  = store.get()
+    apps = [{"id": res["ids"][i], **res["metadatas"][i]}
+            for i in range(len(res["ids"]))]
     return sorted(apps, key=lambda x: x.get("applied_date", ""), reverse=True)
 
 def tracker_update_status(app_id: str, status: str, notes: str):
-    col = _get_app_col()
-    col.update(ids=[app_id], metadatas=[{"status": status, "notes": notes}])
+    _app_store().update(ids=[app_id], metadatas=[{"status": status, "notes": notes}])
 
 def tracker_delete(app_id: str):
-    col = _get_app_col()
-    col.delete(ids=[app_id])
+    _app_store().delete(ids=[app_id])
 
 def tracker_similar(query: str, n: int = 5) -> list[dict]:
-    col = _get_app_col()
-    if col.count() == 0:
+    store = _app_store()
+    if store.count() == 0:
         return []
-    res = col.query(
-        query_embeddings=embed([query]),
-        n_results=min(n, col.count()),
-        include=["metadatas", "distances"],
-    )
+    res = store.query(query_embeddings=embed([query]),
+                      n_results=min(n, store.count()))
     results = []
     for i, app_id in enumerate(res["ids"][0]):
-        m = res["metadatas"][0][i]
-        dist = res["distances"][0][i]
-        results.append({"id": app_id, "similarity": round(1 - dist, 3), **m})
+        results.append({"id": app_id,
+                        "similarity": round(1 - res["distances"][0][i], 3),
+                        **res["metadatas"][0][i]})
     return results
 
 def tracker_export_csv(apps: list[dict]) -> str:

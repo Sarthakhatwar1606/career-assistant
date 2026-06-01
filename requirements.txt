@@ -1,20 +1,8 @@
-# ── Core UI ────────────────────────────────────────────
 streamlit>=1.35.0
-
-# ── LLM backends ───────────────────────────────────────
-ollama>=0.2.0                  # local mode
-groq>=0.9.0                    # cloud mode (Streamlit Cloud)
-
-# ── Vector store ───────────────────────────────────────
-chromadb==0.5.23               # pinned — 0.6+ breaks on Python 3.14
-protobuf>=5.29.0               # fixes opentelemetry protobuf crash
-
-# ── Embeddings ─────────────────────────────────────────
-sentence-transformers>=3.0.0   # cloud mode embeddings (all-MiniLM-L6-v2)
-torch>=2.0.0                   # required by sentence-transformers
-
-# ── Document parsing ───────────────────────────────────
+ollama>=0.2.0
+groq>=0.9.0
 pypdf>=4.2.0
-
-# ── HTTP / job APIs ────────────────────────────────────
+sentence-transformers>=3.0.0
+torch>=2.0.0
 requests>=2.31.0
+numpy>=1.24.0
