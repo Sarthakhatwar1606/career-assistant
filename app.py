@@ -189,16 +189,6 @@ details summary {
 [data-testid="stChatMessage"] pre {
     color: #1E293B !important;
 }
-/* Chat input box */
-[data-testid="stChatInput"] {
-    background: white !important;
-    border-radius: 12px !important;
-    border: 1.5px solid #E2E8F0 !important;
-}
-[data-testid="stChatInput"] textarea {
-    color: #1E293B !important;
-    background: white !important;
-}
 
 /* ── Metric override ────────────────────────────────── */
 [data-testid="stMetric"] {
