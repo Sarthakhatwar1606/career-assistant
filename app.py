@@ -179,6 +179,25 @@ details summary {
 [data-testid="stChatMessage"] {
     border-radius: 12px !important;
     padding: 4px !important;
+    background: white !important;
+}
+[data-testid="stChatMessage"] p,
+[data-testid="stChatMessage"] li,
+[data-testid="stChatMessage"] span,
+[data-testid="stChatMessage"] div,
+[data-testid="stChatMessage"] code,
+[data-testid="stChatMessage"] pre {
+    color: #1E293B !important;
+}
+/* Chat input box */
+[data-testid="stChatInput"] {
+    background: white !important;
+    border-radius: 12px !important;
+    border: 1.5px solid #E2E8F0 !important;
+}
+[data-testid="stChatInput"] textarea {
+    color: #1E293B !important;
+    background: white !important;
 }
 
 /* ── Metric override ────────────────────────────────── */
